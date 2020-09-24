@@ -27,7 +27,7 @@ unit FastcodePatch;
 
 interface
 
-function FastcodeGetAddress(AStub: Pointer): Pointer;
+function FastcodeGetAddress(AProc: Pointer): Pointer;
 procedure FastcodeAddressPatch(const ASource, ADestination: Pointer);
 
 implementation
@@ -39,18 +39,24 @@ type
   PJump = ^TJump;
   TJump = packed record
     OpCode: Byte;
-    Distance: Pointer;
+    Distance: integer;
   end;
 
-function FastcodeGetAddress(AStub: Pointer): Pointer;
+function FastcodeGetAddress(AProc: Pointer): Pointer;
+type
+  PAbsoluteIndirectJmp = ^TAbsoluteIndirectJmp;
+  TAbsoluteIndirectJmp = packed record
+    OpCode: Word;   //$FF25(Jmp, FF /4)
+    Addr: Cardinal;
+  end;
+var J: PAbsoluteIndirectJmp;
 begin
-  if PBYTE(AStub)^ = $E8 then
-  begin
-    Inc(Integer(AStub));
-    Result := Pointer(Integer(AStub) + SizeOf(Pointer) + PInteger(AStub)^);
-  end
+  J := PAbsoluteIndirectJmp(AProc);
+  if (J.OpCode = $25FF) then
+    {$ifdef Win32}Result := PPointer(J.Addr)^{$endif}
+    {$ifdef Win64}Result := PPointer(NativeUInt(AProc) + J.Addr + 6{Instruction Size})^{$endif}
   else
-    Result := nil;
+    Result := AProc;
 end;
 
 procedure FastcodeAddressPatch(const ASource, ADestination: Pointer);
@@ -64,7 +70,7 @@ begin
   begin
     NewJump := PJump(ASource);
     NewJump.OpCode := $E9;
-    NewJump.Distance := Pointer(Integer(ADestination) - Integer(ASource) - 5);
+    NewJump.Distance := NativeUInt(ADestination) - NativeUInt(ASource) - Size;
 
     FlushInstructionCache(GetCurrentProcess, ASource, SizeOf(TJump));
     VirtualProtect(ASource, Size, OldProtect, @OldProtect);
